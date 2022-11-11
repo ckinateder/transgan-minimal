@@ -259,7 +259,7 @@ for epoch in trange(epochs, desc="epoch", position=1):
         data_fake = generator(create_noise(b_size, nz)).detach()
         data_real = image
         loss_d += train_discriminator(optim_d, data_real, data_fake).cpu().detach()
-        # data_fake = generator(create_noise(b_size, nz)).detach()
+        data_fake = generator(create_noise(b_size, nz))
         loss_g += train_generator(optim_g, data_fake).cpu().detach()
 
     # final forward pass through generator to create fake data after training for current epoch
