@@ -176,12 +176,14 @@ criterion = nn.BCELoss()
 losses_g = []  # to store generator loss after each epoch
 losses_d = []  # to store discriminator loss after each epoch
 
-# function to train the discriminator network
+
 def train_discriminator(optimizer, data_real, data_fake):
+    """Train the discriminator network"""
+    # get the batch size
     b_size = data_real.size(0)
-    # get the real label vector
+
+    # get the label vectors
     real_label = label_real(b_size).squeeze()
-    # get the fake label vector
     fake_label = label_fake(b_size).unsqueeze(1).unsqueeze(1)
 
     optimizer.zero_grad()
@@ -194,10 +196,10 @@ def train_discriminator(optimizer, data_real, data_fake):
     output_fake = discriminator(data_fake)
     loss_fake = criterion(output_fake, fake_label)
 
-    # compute gradients of real loss
+    # compute gradients of losses
     loss_real.backward()
-    # compute gradients of fake loss
     loss_fake.backward()
+
     # update discriminator parameters
     optimizer.step()
 
@@ -206,7 +208,10 @@ def train_discriminator(optimizer, data_real, data_fake):
 
 # function to train the generator network
 def train_generator(optimizer, data_fake):
+    """Train the generator network"""
+    # get the batch size
     b_size = data_fake.size(0)
+
     # get the real label vector
     real_label = label_real(b_size).unsqueeze(1).unsqueeze(1)
 
@@ -218,6 +223,7 @@ def train_generator(optimizer, data_fake):
 
     # compute gradients of loss
     loss.backward()
+
     # update generator parameters
     optimizer.step()
 
@@ -226,9 +232,7 @@ def train_generator(optimizer, data_fake):
 
 # create the noise vector
 noise = create_noise(sample_size, nz)
-# print('SIZE', noise.size())
-# print('NOISE', noise)
-
+print("Noise vector size:", noise.size())
 
 output_path = "outputs"
 os.makedirs(output_path) if not os.path.exists(output_path) else ...
@@ -240,16 +244,13 @@ print(
 generator.train()
 discriminator.train()
 
-for epoch in trange(epochs, desc="epoch", position=1):
+for epoch in trange(epochs, desc="epoch", position=1, leave=False):
     loss_g = 0.0
     loss_d = 0.0
 
     final_bi = int(len(train_data) / int(train_loader.batch_size))
     for bi, data in tqdm(
-        enumerate(train_loader),
-        total=final_bi,
-        desc="batch",
-        position=0,
+        enumerate(train_loader), total=final_bi, desc="batch", position=0, leave=False
     ):
         image, _ = data
         image = image.to(device)
