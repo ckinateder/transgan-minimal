@@ -37,50 +37,6 @@ def save_checkpoint(states, is_best, output_dir, filename="checkpoint.pth"):
         torch.save(states, os.path.join(output_dir, "checkpoint_best.pth"))
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--image_size", type=int, default=32, help="Size of image for discriminator input."
-)
-parser.add_argument(
-    "--initial_size", type=int, default=8, help="Initial size for generator."
-)
-parser.add_argument(
-    "--patch_size", type=int, default=4, help="Patch size for generated image."
-)
-parser.add_argument(
-    "--num_classes", type=int, default=1, help="Number of classes for discriminator."
-)
-parser.add_argument(
-    "--lr_gen", type=float, default=0.0001, help="Learning rate for generator."
-)
-parser.add_argument(
-    "--lr_dis", type=float, default=0.0001, help="Learning rate for discriminator."
-)
-parser.add_argument("--weight_decay", type=float, default=1e-3, help="Weight decay.")
-parser.add_argument("--latent_dim", type=int, default=1024, help="Latent dimension.")
-parser.add_argument("--n_critic", type=int, default=5, help="n_critic.")
-parser.add_argument("--max_iter", type=int, default=500000, help="max_iter.")
-parser.add_argument(
-    "--gener_batch_size", type=int, default=64, help="Batch size for generator."
-)
-parser.add_argument(
-    "--dis_batch_size", type=int, default=32, help="Batch size for discriminator."
-)
-parser.add_argument("--epoch", type=int, default=200, help="Number of epoch.")
-parser.add_argument("--output_dir", type=str, default="checkpoint", help="Checkpoint.")
-parser.add_argument("--dim", type=int, default=384, help="Embedding dimension.")
-parser.add_argument(
-    "--img_name", type=str, default="img_name", help="Name of pictures file."
-)
-parser.add_argument("--loss", type=str, default="hinge", help="Loss function")
-parser.add_argument("--phi", type=int, default="1", help="phi")
-parser.add_argument("--beta1", type=int, default="0", help="beta1")
-parser.add_argument("--beta2", type=float, default="0.99", help="beta2")
-parser.add_argument(
-    "--diff_aug", type=str, default="translation,cutout,color", help="Data Augmentation"
-)
-ttype = torch.FloatTensor
-
 dev = ""
 if torch.has_mps and torch.backends.mps.is_built():
     dev = torch.device("mps")
@@ -92,47 +48,78 @@ else:
 device = torch.device(dev)
 print("Device:", device)
 
-args = parser.parse_args()
+parser = argparse.ArgumentParser()
+ttype = torch.FloatTensor
+IMAGE_SIZE = 32
+INITIAL_SIZE = 8
+INPUT_CHANNEL = 3
+PATCH_SIZE = 4
+NUM_CLASSES = 1
+LR_GENERATOR = 0.0001
+LR_DISCRIMINATOR = 0.0001
+LATENT_DIM = 1024
+EMBED_DIM = 384
+DIS_DEPTH = 7
+N_CRITIC = 5
+GEN_BATCH_SIZE = 64
+DIS_BATCH_SIZE = 32
+EPOCHS = 200
+PHI = 1
+BETA1 = 0.0
+BETA2 = 0.99
+
+LOSS = "hinge"
+DIFF_AUG = "translation,cutout,color"
+OUTPUT_DIR = "checkpoint"
+
+best = 1e4
+fid_stat_path = "fid_stat/fid_stats_cifar10_train.npz"
+generated_dir = "generated_images"
+
+if os.path.exists(generated_dir):
+    shutil.rmtree(generated_dir)
+
+os.makedirs(generated_dir)
+
 
 generator = Generator(
     depth1=5,
     depth2=4,
     depth3=2,
-    initial_size=8,
-    dim=384,
+    initial_size=INITIAL_SIZE,
+    dim=EMBED_DIM,
     heads=4,
     mlp_ratio=4,
     drop_rate=0.5,
 )
-generator.to(device)
-
 discriminator = Discriminator(
-    diff_aug=args.diff_aug,
-    image_size=32,
-    patch_size=4,
-    input_channel=3,
-    num_classes=1,
-    dim=384,
-    depth=7,
+    diff_aug=DIFF_AUG,
+    image_size=IMAGE_SIZE,
+    patch_size=PATCH_SIZE,
+    input_channel=INPUT_CHANNEL,
+    num_classes=NUM_CLASSES,
+    dim=EMBED_DIM,
+    depth=DIS_DEPTH,
     heads=4,
     mlp_ratio=4,
     drop_rate=0.0,
 )
 discriminator.to(device)
+generator.to(device)
 
 generator.apply(inits_weight)
 discriminator.apply(inits_weight)
 
 optim_gen = optim.Adam(
     filter(lambda p: p.requires_grad, generator.parameters()),
-    lr=args.lr_gen,
-    betas=(args.beta1, args.beta2),
+    lr=LR_GENERATOR,
+    betas=(BETA1, BETA2),
 )
 
 optim_dis = optim.Adam(
     filter(lambda p: p.requires_grad, discriminator.parameters()),
-    lr=args.lr_dis,
-    betas=(args.beta1, args.beta2),
+    lr=LR_DISCRIMINATOR,
+    betas=(BETA1, BETA2),
 )
 
 writer = SummaryWriter()
@@ -175,10 +162,10 @@ def train(
     optim_dis,
     epoch,
     writer,
-    img_size=32,
-    latent_dim=args.latent_dim,
-    n_critic=args.n_critic,
-    gener_batch_size=args.gener_batch_size,
+    img_size=IMAGE_SIZE,
+    latent_dim=LATENT_DIM,
+    n_critic=N_CRITIC,
+    gener_batch_size=GEN_BATCH_SIZE,
     gener_output_dir="generated_images",
 ):
 
@@ -213,18 +200,18 @@ def train(
 
         fake_valid = discriminator(fake_imgs)
 
-        if args.loss == "hinge":
+        if LOSS == "hinge":
             loss_dis = torch.mean(nn.ReLU(inplace=True)(1.0 - real_valid)).to(
                 device
             ) + torch.mean(nn.ReLU(inplace=True)(1 + fake_valid)).to(device)
-        elif args.loss == "wgangp_eps":
+        elif LOSS == "wgangp_eps":
             gradient_penalty = compute_gradient_penalty(
-                discriminator, real_imgs, fake_imgs.detach(), args.phi
+                discriminator, real_imgs, fake_imgs.detach(), PHI
             )
             loss_dis = (
                 -torch.mean(real_valid)
                 + torch.mean(fake_valid)
-                + gradient_penalty * 10 / (args.phi**2)
+                + gradient_penalty * 10 / (PHI**2)
             )
 
         loss_dis.backward()
@@ -249,7 +236,6 @@ def train(
 
         if gen_step and index % 100 == 0:
             sample_imgs = generated_imgs[:25]
-            # img_grid = make_grid(sample_imgs, nrow=5, normalize=True, scale_each=True)
             save_image(
                 sample_imgs,
                 os.path.join(
@@ -296,14 +282,7 @@ def validate(generator, writer_dict, fid_stat):  # ignored rn
     return fid_score
 
 
-best = 1e4
-fid_stat_path = "fid_stat/fid_stats_cifar10_train.npz"
-generated_dir = "generated_images"
-os.makedirs(generated_dir) if not os.path.exists(generated_dir) else (
-    shutil.rmtree(generated_dir) and os.makedirs(generated_dir)
-)
-
-for epoch in range(args.epoch):
+for epoch in range(EPOCHS):
     train(
         noise,
         generator,
@@ -312,10 +291,10 @@ for epoch in range(args.epoch):
         optim_dis,
         epoch,
         writer,
-        img_size=32,
-        latent_dim=args.latent_dim,
-        n_critic=args.n_critic,
-        gener_batch_size=args.gener_batch_size,
+        img_size=IMAGE_SIZE,
+        latent_dim=LATENT_DIM,
+        n_critic=N_CRITIC,
+        gener_batch_size=GEN_BATCH_SIZE,
         gener_output_dir=generated_dir,
     )
 
@@ -328,9 +307,7 @@ for epoch in range(args.epoch):
     print(f"FID score: {score} - best ID score: {best} || @ epoch {epoch+1}.")
     if epoch == 0 or epoch > 30:
         if score < best:
-            save_checkpoint(
-                checkpoint, is_best=(score < best), output_dir=args.output_dir
-            )
+            save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
             print("Saved Latest Model!")
             best = score
 
@@ -339,4 +316,4 @@ checkpoint = {"epoch": epoch, "best_fid": best}
 checkpoint["generator_state_dict"] = generator.state_dict()
 checkpoint["discriminator_state_dict"] = discriminator.state_dict()
 score = validate(generator, writer_dict, fid_stat_path)  ####CHECK AGAIN
-save_checkpoint(checkpoint, is_best=(score < best), output_dir=args.output_dir)
+save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
