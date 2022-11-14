@@ -7,7 +7,6 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 import torchvision.datasets as datasets
 import matplotlib
-
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
 from tqdm import tqdm, trange
@@ -132,52 +131,7 @@ class Discriminator(nn.Module):
         return self.main(input)
 
 
-# learning parameters / configurations according to paper
-image_size = 64  # we need to resize image to 64x64
-batch_size = 128
-nz = 100  # latent vector size
-beta1 = 0.5  # beta1 value for Adam optimizer
-lr = 0.0002  # learning rate according to paper
-sample_size = 64  # fixed sample size
-epochs = 25  # number of epoch to train
-
-# image transforms
-transform = transforms.Compose(
-    [
-        transforms.Resize(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ]
-)
-
-# prepare the data
-train_data = datasets.CIFAR10(
-    root="input/data", train=True, download=True, transform=transform
-)
-train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-
-# initialize models
-generator = Generator(nz).to(device)
-discriminator = Discriminator().to(device)
-
-# initialize weights
-generator.apply(weights_init)
-discriminator.apply(weights_init)
-print(generator)
-print(discriminator)
-
-# optimizers
-optim_g = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, 0.999))
-optim_d = optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, 0.999))
-
-# loss function
-criterion = nn.BCELoss()
-
-losses_g = []  # to store generator loss after each epoch
-losses_d = []  # to store discriminator loss after each epoch
-
-
-def train_discriminator(optimizer, data_real, data_fake):
+def train_discriminator(discriminator, optimizer, data_real, data_fake):
     """Train the discriminator network"""
     # get the batch size
     b_size = data_real.size(0)
@@ -207,7 +161,7 @@ def train_discriminator(optimizer, data_real, data_fake):
 
 
 # function to train the generator network
-def train_generator(optimizer, data_fake):
+def train_generator(generator, optimizer, data_fake):
     """Train the generator network"""
     # get the batch size
     b_size = data_fake.size(0)
@@ -230,65 +184,120 @@ def train_generator(optimizer, data_fake):
     return loss
 
 
-# create the noise vector
-noise = create_noise(sample_size, nz)
-print("Noise vector size:", noise.size())
+if __name__ == "__main__":
+    # learning parameters / configurations according to paper
+    image_size = 64  # we need to resize image to 64x64
+    batch_size = 128
+    nz = 100  # latent vector size
+    beta1 = 0.5  # beta1 value for Adam optimizer
+    lr = 0.0002  # learning rate according to paper
+    sample_size = 64  # fixed sample size
+    epochs = 25  # number of epoch to train
 
-output_path = "outputs"
-os.makedirs(output_path) if not os.path.exists(output_path) else ...
-print(
-    f"Training the model on {device}. Image size: {image_size}px, "
-    f"Batch size: {batch_size}, Latent vector size: {nz}, "
-    f"Learning rate: {lr}, Beta1: {beta1}, Epochs: {epochs}"
-)
-generator.train()
-discriminator.train()
-
-for epoch in trange(epochs, desc="epoch", position=1, leave=False):
-    loss_g = 0.0
-    loss_d = 0.0
-
-    final_bi = int(len(train_data) / int(train_loader.batch_size))
-    for bi, data in tqdm(
-        enumerate(train_loader), total=final_bi, desc="batch", position=0, leave=False
-    ):
-        image, _ = data
-        image = image.to(device)
-        b_size = len(image)
-
-        # forward pass through generator to create fake data
-        data_fake = generator(create_noise(b_size, nz)).detach()
-        data_real = image
-        loss_d += train_discriminator(optim_d, data_real, data_fake).cpu().detach()
-        data_fake = generator(create_noise(b_size, nz))
-        loss_g += train_generator(optim_g, data_fake).cpu().detach()
-
-    # final forward pass through generator to create fake data after training for current epoch
-    generated_img = generator(noise).cpu().detach()
-
-    # save the generated torch tensor models to disk
-    save_generator_image(
-        generated_img, os.path.join(output_path, f"gen_img{epoch}.png")
+    # image transforms
+    transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
     )
 
-    epoch_loss_g = loss_g / final_bi  # total generator loss for the epoch
-    epoch_loss_d = loss_d / final_bi  # total discriminator loss for the epoch
-    losses_g.append(epoch_loss_g)
-    losses_d.append(epoch_loss_d)
-
-    tqdm.write(
-        f"Epoch {epoch+1} of {epochs} - Generator loss: {epoch_loss_g:.8f}, Discriminator loss: {epoch_loss_d:.8f}"
+    # prepare the data
+    train_data = datasets.CIFAR10(
+        root="input/data", train=True, download=True, transform=transform
     )
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
-print("DONE TRAINING")
+    # initialize models
+    generator = Generator(nz).to(device)
+    discriminator = Discriminator().to(device)
 
-# save the model weights to disk
-torch.save(generator.state_dict(), "outputs/generator.pth")
+    # initialize weights
+    generator.apply(weights_init)
+    discriminator.apply(weights_init)
+    print(generator)
+    print(discriminator)
 
-# plot and save the generator and discriminator loss
-plt.figure()
-plt.plot(losses_g, label="Generator loss")
-plt.plot(losses_d, label="Discriminator Loss")
-plt.legend()
-plt.savefig("outputs/loss.png")
-plt.show()
+    # optimizers
+    optim_g = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, 0.999))
+    optim_d = optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, 0.999))
+
+    # loss function
+    criterion = nn.BCELoss()
+
+    losses_g = []  # to store generator loss after each epoch
+    losses_d = []  # to store discriminator loss after each epoch
+
+    # create the noise vector
+    noise = create_noise(sample_size, nz)
+    print("Noise vector size:", noise.size())
+
+    output_path = "outputs"
+    os.makedirs(output_path) if not os.path.exists(output_path) else ...
+    print(
+        f"Training the model on {device}. Image size: {image_size}px, "
+        f"Batch size: {batch_size}, Latent vector size: {nz}, "
+        f"Learning rate: {lr}, Beta1: {beta1}, Epochs: {epochs}"
+    )
+    generator.train()
+    discriminator.train()
+
+    for epoch in trange(epochs, desc="epoch", position=1, leave=False):
+        loss_g = 0.0
+        loss_d = 0.0
+
+        final_bi = int(len(train_data) / int(train_loader.batch_size))
+        for bi, data in tqdm(
+            enumerate(train_loader),
+            total=final_bi,
+            desc="batch",
+            position=0,
+            leave=False,
+        ):
+            image, _ = data
+            image = image.to(device)
+            b_size = len(image)
+
+            # forward pass through generator to create fake data
+            data_fake = generator(create_noise(b_size, nz)).detach()
+            data_real = image
+            loss_d += (
+                train_discriminator(discriminator, optim_d, data_real, data_fake)
+                .cpu()
+                .detach()
+            )
+
+            data_fake = generator(create_noise(b_size, nz))
+            loss_g += train_generator(generator, optim_g, data_fake).cpu().detach()
+
+        # final forward pass through generator to create fake data after training for current epoch
+        generated_img = generator(noise).cpu().detach()
+
+        # save the generated torch tensor models to disk
+        save_generator_image(
+            generated_img, os.path.join(output_path, f"gen_img{epoch}.png")
+        )
+
+        epoch_loss_g = loss_g / final_bi  # total generator loss for the epoch
+        epoch_loss_d = loss_d / final_bi  # total discriminator loss for the epoch
+        losses_g.append(epoch_loss_g)
+        losses_d.append(epoch_loss_d)
+
+        tqdm.write(
+            f"Epoch {epoch+1} of {epochs} - Generator loss: {epoch_loss_g:.8f}, Discriminator loss: {epoch_loss_d:.8f}"
+        )
+
+    print("DONE TRAINING")
+
+    # save the model weights to disk
+    torch.save(generator.state_dict(), "outputs/generator.pth")
+
+    # plot and save the generator and discriminator loss
+    plt.figure()
+    plt.plot(losses_g, label="Generator loss")
+    plt.plot(losses_d, label="Discriminator Loss")
+    plt.legend()
+    plt.savefig("outputs/loss.png")
+    plt.show()
