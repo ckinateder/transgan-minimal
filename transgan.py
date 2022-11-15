@@ -14,7 +14,7 @@ import shutil
 
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
-from models import Generator, Discriminator, inits_weight
+from models import Generator, Discriminator, inits_weight, compute_gradient_penalty
 from scores.fid_score import get_fid
 
 
@@ -64,51 +64,23 @@ DIFF_AUG = "translation,cutout,color"
 OUTPUT_DIR = "checkpoint"
 
 best = 1e4
-fid_stat_path = "fid_stat/fid_stats_cifar10_train.npz"
-generated_dir = "generated_images"
-
-
-def compute_gradient_penalty(D, real_samples, fake_samples, phi):
-    """Calculates the gradient penalty loss for WGAN GP"""
-    # Random weight term for interpolation between real and fake samples
-    alpha = ttype(np.random.random((real_samples.size(0), 1, 1, 1))).to(
-        real_samples.get_device()
-    )
-    # Get random interpolation between real and fake samples
-    interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(
-        True
-    )
-    d_interpolates = D(interpolates)
-    fake = torch.ones([real_samples.shape[0], 1], requires_grad=False).to(
-        real_samples.get_device()
-    )
-    # Get gradient w.r.t. interpolates
-    gradients = torch.autograd.grad(
-        outputs=d_interpolates,
-        inputs=interpolates,
-        grad_outputs=fake,
-        create_graph=True,
-        retain_graph=True,
-        only_inputs=True,
-    )[0]
-    gradients = gradients.contiguous().view(gradients.size(0), -1)
-    gradient_penalty = ((gradients.norm(2, dim=1) - phi) ** 2).mean()
-    return gradient_penalty
+FID_STAT_PATH = "fid_stat/fid_stats_cifar10_train.npz"
+GENERATED_DIR = "generated_images"
 
 
 def train(
-    train_loader,
-    generator,
-    discriminator,
-    optim_gen,
-    optim_dis,
-    epoch,
-    writer_dict,
-    loss,
-    latent_dim=LATENT_DIM,
-    n_critic=N_CRITIC,
-    gen_batch_size=GEN_BATCH_SIZE,
-    gen_output_dir="generated_images",
+    train_loader: torch.utils.data.DataLoader,
+    generator: nn.Module,
+    discriminator: nn.Module,
+    optim_gen: torch.optim.Optimizer,
+    optim_dis: torch.optim.Optimizer,
+    epoch: int,
+    writer_dict: dict,
+    loss: str = LOSS,
+    latent_dim: int = LATENT_DIM,
+    n_critic: int = N_CRITIC,
+    gen_batch_size: int = GEN_BATCH_SIZE,
+    gen_output_dir: str = "generated_images",
 ):
     writer = writer_dict["writer"]
     gen_step = 0
@@ -133,7 +105,11 @@ def train(
             ) + torch.mean(nn.ReLU(inplace=True)(1 + fake_valid)).to(device)
         elif loss == "wgangp_eps":
             gradient_penalty = compute_gradient_penalty(
-                discriminator, real_imgs, fake_imgs.detach(), PHI
+                discriminator,
+                real_imgs,
+                fake_imgs.detach(),
+                PHI,
+                ttype,
             )
             loss_dis = (
                 -torch.mean(real_valid)
@@ -187,17 +163,17 @@ def train(
             )
 
 
-def validate(generator, writer_dict, fid_stat):  # ignored rn
+def validate(generator: nn.Module, writer_dict: dict, fid_stat_path: str):
     writer = writer_dict["writer"]
     global_steps = writer_dict["valid_global_steps"]
 
     generator = generator.eval()
     fid_score = get_fid(
-        fid_stat,
+        fid_stat_path,
         epoch,
         generator,
         num_img=5000,
-        val_batch_size=60 * 2,
+        val_batch_size=64 * 2,
         latent_dim=1024,
         writer_dict=None,
         cls_idx=None,
@@ -227,10 +203,10 @@ if __name__ == "__main__":
         dataset=train_set, batch_size=30, shuffle=True
     )
 
-    if os.path.exists(generated_dir):
-        shutil.rmtree(generated_dir)
+    if os.path.exists(GENERATED_DIR):
+        shutil.rmtree(GENERATED_DIR)
 
-    os.makedirs(generated_dir)
+    os.makedirs(GENERATED_DIR)
 
     generator = Generator(
         depth1=GEN_DEPTH_1,
@@ -292,19 +268,21 @@ if __name__ == "__main__":
             latent_dim=LATENT_DIM,
             n_critic=N_CRITIC,
             gen_batch_size=GEN_BATCH_SIZE,
-            gen_output_dir=generated_dir,
+            gen_output_dir=GENERATED_DIR,
         )
 
         checkpoint = {"epoch": epoch, "best_fid": best}
         checkpoint["generator_state_dict"] = generator.state_dict()
         checkpoint["discriminator_state_dict"] = discriminator.state_dict()
-        score = validate(generator, writer_dict, fid_stat_path)
+        score = validate(generator, writer_dict, FID_STAT_PATH)
 
         print(f"FID score: {score} - best ID score: {best} || @ epoch {epoch+1}.")
         if epoch == 0 or epoch > 30:
             if score < best:
                 save_checkpoint(
-                    checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR
+                    checkpoint,
+                    is_best=(score < best),
+                    output_dir=OUTPUT_DIR,
                 )
                 print("Saved Latest Model!")
                 best = score
