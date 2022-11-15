@@ -67,55 +67,6 @@ best = 1e4
 fid_stat_path = "fid_stat/fid_stats_cifar10_train.npz"
 generated_dir = "generated_images"
 
-if os.path.exists(generated_dir):
-    shutil.rmtree(generated_dir)
-
-os.makedirs(generated_dir)
-
-
-generator = Generator(
-    depth1=GEN_DEPTH_1,
-    depth2=GEN_DEPTH_2,
-    depth3=GEN_DEPTH_3,
-    initial_size=INITIAL_SIZE,
-    dim=EMBED_DIM,
-    heads=HEADS,
-    mlp_ratio=MLP_RATIO,
-    drop_rate=0.5,
-)
-discriminator = Discriminator(
-    diff_aug=DIFF_AUG,
-    image_size=IMAGE_SIZE,
-    patch_size=PATCH_SIZE,
-    input_channel=INPUT_CHANNEL,
-    num_classes=NUM_CLASSES,
-    dim=EMBED_DIM,
-    depth=DIS_DEPTH,
-    heads=HEADS,
-    mlp_ratio=MLP_RATIO,
-    drop_rate=0.0,
-)
-discriminator.to(device)
-generator.to(device)
-
-generator.apply(inits_weight)
-discriminator.apply(inits_weight)
-
-optim_gen = optim.Adam(
-    filter(lambda p: p.requires_grad, generator.parameters()),
-    lr=LR_GENERATOR,
-    betas=(BETA1, BETA2),
-)
-
-optim_dis = optim.Adam(
-    filter(lambda p: p.requires_grad, discriminator.parameters()),
-    lr=LR_DISCRIMINATOR,
-    betas=(BETA1, BETA2),
-)
-
-writer = SummaryWriter()
-writer_dict = {"writer": writer, "train_global_steps": 0.0, "valid_global_steps": 0.0}
-
 
 def compute_gradient_penalty(D, real_samples, fake_samples, phi):
     """Calculates the gradient penalty loss for WGAN GP"""
@@ -146,13 +97,13 @@ def compute_gradient_penalty(D, real_samples, fake_samples, phi):
 
 
 def train(
+    train_loader,
     generator,
     discriminator,
     optim_gen,
     optim_dis,
     epoch,
-    writer,
-    img_size=IMAGE_SIZE,
+    writer_dict,
     latent_dim=LATENT_DIM,
     n_critic=N_CRITIC,
     gen_batch_size=GEN_BATCH_SIZE,
@@ -165,20 +116,6 @@ def train(
     generator = generator.train()
     discriminator = discriminator.train()
 
-    transform = transforms.Compose(
-        [
-            transforms.Resize(size=(img_size, img_size)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]
-    )
-    train_set = torchvision.datasets.CIFAR10(
-        root="input", train=True, download=True, transform=transform
-    )
-    train_loader = torch.utils.data.DataLoader(
-        dataset=train_set, batch_size=30, shuffle=True
-    )
     for index, (img, _) in enumerate(train_loader):
         global_steps = writer_dict["train_global_steps"]
         real_imgs = img.type(ttype).to(device)
@@ -272,37 +209,106 @@ def validate(generator, writer_dict, fid_stat):  # ignored rn
     return fid_score
 
 
-for epoch in range(EPOCHS):
-    train(
-        generator,
-        discriminator,
-        optim_gen,
-        optim_dis,
-        epoch,
-        writer,
-        img_size=IMAGE_SIZE,
-        latent_dim=LATENT_DIM,
-        n_critic=N_CRITIC,
-        gen_batch_size=GEN_BATCH_SIZE,
-        gen_output_dir=generated_dir,
+if __name__ == "__main__":
+    transform = transforms.Compose(
+        [
+            transforms.Resize(size=(IMAGE_SIZE, IMAGE_SIZE)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
     )
+    train_set = torchvision.datasets.CIFAR10(
+        root="input", train=True, download=True, transform=transform
+    )
+    train_loader = torch.utils.data.DataLoader(
+        dataset=train_set, batch_size=30, shuffle=True
+    )
+
+    if os.path.exists(generated_dir):
+        shutil.rmtree(generated_dir)
+
+    os.makedirs(generated_dir)
+
+    generator = Generator(
+        depth1=GEN_DEPTH_1,
+        depth2=GEN_DEPTH_2,
+        depth3=GEN_DEPTH_3,
+        initial_size=INITIAL_SIZE,
+        dim=EMBED_DIM,
+        heads=HEADS,
+        mlp_ratio=MLP_RATIO,
+        drop_rate=0.5,
+    )
+    discriminator = Discriminator(
+        diff_aug=DIFF_AUG,
+        image_size=IMAGE_SIZE,
+        patch_size=PATCH_SIZE,
+        input_channel=INPUT_CHANNEL,
+        num_classes=NUM_CLASSES,
+        dim=EMBED_DIM,
+        depth=DIS_DEPTH,
+        heads=HEADS,
+        mlp_ratio=MLP_RATIO,
+        drop_rate=0.0,
+    )
+    discriminator.to(device)
+    generator.to(device)
+
+    generator.apply(inits_weight)
+    discriminator.apply(inits_weight)
+
+    optim_gen = optim.Adam(
+        filter(lambda p: p.requires_grad, generator.parameters()),
+        lr=LR_GENERATOR,
+        betas=(BETA1, BETA2),
+    )
+
+    optim_dis = optim.Adam(
+        filter(lambda p: p.requires_grad, discriminator.parameters()),
+        lr=LR_DISCRIMINATOR,
+        betas=(BETA1, BETA2),
+    )
+
+    writer = SummaryWriter()
+    writer_dict = {
+        "writer": writer,
+        "train_global_steps": 0.0,
+        "valid_global_steps": 0.0,
+    }
+
+    for epoch in range(EPOCHS):
+        train(
+            train_loader,
+            generator,
+            discriminator,
+            optim_gen,
+            optim_dis,
+            epoch,
+            writer_dict,
+            latent_dim=LATENT_DIM,
+            n_critic=N_CRITIC,
+            gen_batch_size=GEN_BATCH_SIZE,
+            gen_output_dir=generated_dir,
+        )
+
+        checkpoint = {"epoch": epoch, "best_fid": best}
+        checkpoint["generator_state_dict"] = generator.state_dict()
+        checkpoint["discriminator_state_dict"] = discriminator.state_dict()
+
+        score = validate(generator, writer_dict, fid_stat_path)
+
+        print(f"FID score: {score} - best ID score: {best} || @ epoch {epoch+1}.")
+        if epoch == 0 or epoch > 30:
+            if score < best:
+                save_checkpoint(
+                    checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR
+                )
+                print("Saved Latest Model!")
+                best = score
 
     checkpoint = {"epoch": epoch, "best_fid": best}
     checkpoint["generator_state_dict"] = generator.state_dict()
     checkpoint["discriminator_state_dict"] = discriminator.state_dict()
-
-    score = validate(generator, writer_dict, fid_stat_path)
-
-    print(f"FID score: {score} - best ID score: {best} || @ epoch {epoch+1}.")
-    if epoch == 0 or epoch > 30:
-        if score < best:
-            save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
-            print("Saved Latest Model!")
-            best = score
-
-
-checkpoint = {"epoch": epoch, "best_fid": best}
-checkpoint["generator_state_dict"] = generator.state_dict()
-checkpoint["discriminator_state_dict"] = discriminator.state_dict()
-score = validate(generator, writer_dict, fid_stat_path)  ####CHECK AGAIN
-save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
+    score = validate(generator, writer_dict, fid_stat_path)  ####CHECK AGAIN
+    save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
