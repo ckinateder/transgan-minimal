@@ -14,21 +14,8 @@ import shutil
 
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
-from models import Generator, Discriminator
+from models import Generator, Discriminator, inits_weight
 from scores.fid_score import get_fid
-
-
-def inits_weight(m):
-    if type(m) == nn.Linear:
-        nn.init.xavier_uniform_(m.weight.data, 1.0)
-
-
-def noise(imgs, latent_dim):
-    return ttype(np.random.normal(0, 1, (imgs.shape[0], latent_dim)))
-
-
-def gener_noise(gener_batch_size, latent_dim):
-    return ttype(np.random.normal(0, 1, (gener_batch_size, latent_dim)))
 
 
 def save_checkpoint(states, is_best, output_dir, filename="checkpoint.pth"):
@@ -60,14 +47,18 @@ LR_DISCRIMINATOR = 0.0001
 LATENT_DIM = 1024
 EMBED_DIM = 384
 DIS_DEPTH = 7
+GEN_DEPTH_1 = 5
+GEN_DEPTH_2 = 4
+GEN_DEPTH_3 = 2
+HEADS = 4
+MLP_RATIO = 4
 N_CRITIC = 5
 GEN_BATCH_SIZE = 64
-DIS_BATCH_SIZE = 32
+DIS_BATCH_SIZE = 64
 EPOCHS = 200
 PHI = 1
 BETA1 = 0.0
 BETA2 = 0.99
-
 LOSS = "hinge"
 DIFF_AUG = "translation,cutout,color"
 OUTPUT_DIR = "checkpoint"
@@ -83,13 +74,13 @@ os.makedirs(generated_dir)
 
 
 generator = Generator(
-    depth1=5,
-    depth2=4,
-    depth3=2,
+    depth1=GEN_DEPTH_1,
+    depth2=GEN_DEPTH_2,
+    depth3=GEN_DEPTH_3,
     initial_size=INITIAL_SIZE,
     dim=EMBED_DIM,
-    heads=4,
-    mlp_ratio=4,
+    heads=HEADS,
+    mlp_ratio=MLP_RATIO,
     drop_rate=0.5,
 )
 discriminator = Discriminator(
@@ -100,8 +91,8 @@ discriminator = Discriminator(
     num_classes=NUM_CLASSES,
     dim=EMBED_DIM,
     depth=DIS_DEPTH,
-    heads=4,
-    mlp_ratio=4,
+    heads=HEADS,
+    mlp_ratio=MLP_RATIO,
     drop_rate=0.0,
 )
 discriminator.to(device)
@@ -155,7 +146,6 @@ def compute_gradient_penalty(D, real_samples, fake_samples, phi):
 
 
 def train(
-    noise,
     generator,
     discriminator,
     optim_gen,
@@ -165,8 +155,8 @@ def train(
     img_size=IMAGE_SIZE,
     latent_dim=LATENT_DIM,
     n_critic=N_CRITIC,
-    gener_batch_size=GEN_BATCH_SIZE,
-    gener_output_dir="generated_images",
+    gen_batch_size=GEN_BATCH_SIZE,
+    gen_output_dir="generated_images",
 ):
 
     writer = writer_dict["writer"]
@@ -221,16 +211,16 @@ def train(
 
         if global_steps % n_critic == 0:
             optim_gen.zero_grad()
-            gener_noise = ttype(
-                np.random.normal(0, 1, (gener_batch_size, latent_dim))
-            ).to(device)
-            generated_imgs = generator(gener_noise)
+            gen_noise = ttype(np.random.normal(0, 1, (gen_batch_size, latent_dim))).to(
+                device
+            )
+            generated_imgs = generator(gen_noise)
             fake_valid = discriminator(generated_imgs)
 
-            gener_loss = -torch.mean(fake_valid).to(device)
-            gener_loss.backward()
+            gen_loss = -torch.mean(fake_valid).to(device)
+            gen_loss.backward()
             optim_gen.step()
-            writer.add_scalar("gener_loss", gener_loss.item(), global_steps)
+            writer.add_scalar("gen_loss", gen_loss.item(), global_steps)
 
             gen_step += 1
 
@@ -239,7 +229,7 @@ def train(
             save_image(
                 sample_imgs,
                 os.path.join(
-                    gener_output_dir,
+                    gen_output_dir,
                     f"generated_img_{epoch}_{index % len(train_loader)}.jpg",
                 ),
                 nrow=5,
@@ -253,7 +243,7 @@ def train(
                     index % len(train_loader),
                     len(train_loader),
                     loss_dis.item(),
-                    gener_loss.item(),
+                    gen_loss.item(),
                 )
             )
 
@@ -284,7 +274,6 @@ def validate(generator, writer_dict, fid_stat):  # ignored rn
 
 for epoch in range(EPOCHS):
     train(
-        noise,
         generator,
         discriminator,
         optim_gen,
@@ -294,8 +283,8 @@ for epoch in range(EPOCHS):
         img_size=IMAGE_SIZE,
         latent_dim=LATENT_DIM,
         n_critic=N_CRITIC,
-        gener_batch_size=GEN_BATCH_SIZE,
-        gener_output_dir=generated_dir,
+        gen_batch_size=GEN_BATCH_SIZE,
+        gen_output_dir=generated_dir,
     )
 
     checkpoint = {"epoch": epoch, "best_fid": best}

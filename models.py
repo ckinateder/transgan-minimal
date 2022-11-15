@@ -116,6 +116,11 @@ AUGMENT_FNS = {
 }
 
 
+def inits_weight(m):
+    if type(m) == nn.Linear:
+        nn.init.xavier_uniform_(m.weight.data, 1.0)
+
+
 class MLP(nn.Module):
     def __init__(self, in_feat, hid_feat=None, out_feat=None, dropout=0.0):
         super().__init__()
