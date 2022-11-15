@@ -104,12 +104,12 @@ def train(
     optim_dis,
     epoch,
     writer_dict,
+    loss,
     latent_dim=LATENT_DIM,
     n_critic=N_CRITIC,
     gen_batch_size=GEN_BATCH_SIZE,
     gen_output_dir="generated_images",
 ):
-
     writer = writer_dict["writer"]
     gen_step = 0
 
@@ -127,11 +127,11 @@ def train(
 
         fake_valid = discriminator(fake_imgs)
 
-        if LOSS == "hinge":
+        if loss == "hinge":
             loss_dis = torch.mean(nn.ReLU(inplace=True)(1.0 - real_valid)).to(
                 device
             ) + torch.mean(nn.ReLU(inplace=True)(1 + fake_valid)).to(device)
-        elif LOSS == "wgangp_eps":
+        elif loss == "wgangp_eps":
             gradient_penalty = compute_gradient_penalty(
                 discriminator, real_imgs, fake_imgs.detach(), PHI
             )
@@ -140,6 +140,8 @@ def train(
                 + torch.mean(fake_valid)
                 + gradient_penalty * 10 / (PHI**2)
             )
+        else:
+            raise NotImplementedError(f"Loss '{loss}' not implemented")
 
         loss_dis.backward()
         optim_dis.step()
@@ -151,8 +153,8 @@ def train(
             gen_noise = ttype(np.random.normal(0, 1, (gen_batch_size, latent_dim))).to(
                 device
             )
-            generated_imgs = generator(gen_noise)
-            fake_valid = discriminator(generated_imgs)
+            gen_imgs = generator(gen_noise)
+            fake_valid = discriminator(gen_imgs)
 
             gen_loss = -torch.mean(fake_valid).to(device)
             gen_loss.backward()
@@ -161,8 +163,8 @@ def train(
 
             gen_step += 1
 
-        if gen_step and index % 100 == 0:
-            sample_imgs = generated_imgs[:25]
+        if gen_step != 0 and index % 100 == 0:
+            sample_imgs = gen_imgs[:25]  # gen_imgs will always be bound here
             save_image(
                 sample_imgs,
                 os.path.join(
@@ -286,6 +288,7 @@ if __name__ == "__main__":
             optim_dis,
             epoch,
             writer_dict,
+            loss=LOSS,
             latent_dim=LATENT_DIM,
             n_critic=N_CRITIC,
             gen_batch_size=GEN_BATCH_SIZE,
@@ -295,7 +298,6 @@ if __name__ == "__main__":
         checkpoint = {"epoch": epoch, "best_fid": best}
         checkpoint["generator_state_dict"] = generator.state_dict()
         checkpoint["discriminator_state_dict"] = discriminator.state_dict()
-
         score = validate(generator, writer_dict, fid_stat_path)
 
         print(f"FID score: {score} - best ID score: {best} || @ epoch {epoch+1}.")
@@ -306,9 +308,3 @@ if __name__ == "__main__":
                 )
                 print("Saved Latest Model!")
                 best = score
-
-    checkpoint = {"epoch": epoch, "best_fid": best}
-    checkpoint["generator_state_dict"] = generator.state_dict()
-    checkpoint["discriminator_state_dict"] = discriminator.state_dict()
-    score = validate(generator, writer_dict, fid_stat_path)  ####CHECK AGAIN
-    save_checkpoint(checkpoint, is_best=(score < best), output_dir=OUTPUT_DIR)
