@@ -312,7 +312,6 @@ class Generator(nn.Module):
         self.linear = nn.Sequential(nn.Conv2d(self.dim // 16, 3, 1, 1, 0))
 
     def forward(self, noise):
-
         x = self.mlp(noise).view(-1, self.initial_size**2, self.dim)
 
         x = x + self.positional_embedding_1
@@ -325,8 +324,8 @@ class Generator(nn.Module):
 
         x, H, W = UpSampling(x, H, W)
         x = x + self.positional_embedding_3
-
         x = self.TransformerEncoder_encoder3(x)
+
         x = self.linear(x.permute(0, 2, 1).view(-1, self.dim // 16, H, W))
 
         return x

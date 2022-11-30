@@ -158,7 +158,7 @@ def train(
                     index % len(train_loader),
                     len(train_loader),
                     loss_dis.item(),
-                    gen_loss.item(),
+                    gen_loss.item(),  # gen_loss will always be bound here
                 )
             )
 
